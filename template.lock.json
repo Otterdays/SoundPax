@@ -1,0 +1,14 @@
+{
+  "templateVersion": "1.0.0",
+  "templateName": "rusty-flutter-boilerplate",
+  "created": "2026-05-31",
+  "stack": {
+    "flutter": "3.44.0",
+    "dart": "3.12.0",
+    "rust": "1.96.0",
+    "flutter_rust_bridge": "2.12.0"
+  },
+  "platforms": ["android", "ios", "windows", "macos", "linux", "web"],
+  "defaultAppName": "soundpax",
+  "defaultOrg": "com.otterdays"
+}

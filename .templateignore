@@ -1,0 +1,21 @@
+# Excluded when copying this repo as a template (build/cache/ephemeral)
+.git/
+build/
+.dart_tool/
+.plugin_symlinks/
+rust/target/
+rust_builder/cargokit/build/
+android/.gradle/
+android/app/build/
+android/local.properties
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+macos/Pods/
+macos/Flutter/ephemeral/
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
