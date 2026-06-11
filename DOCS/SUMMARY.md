@@ -6,9 +6,11 @@ Cross-platform Flutter + Rust app — **SoundPax** (16-pad Android/tablet soundb
 
 ## Status
 
-[AMENDED 2026-06-08]: **Phase 1 MVP — implemented, pending tablet verification**
+[AMENDED 2026-06-09]: **Phase 1 MVP + UX hardening — tablet verification ongoing**
 
-- **Product**: 4×4 pad grid, mic record, Rust WAV normalize/save, multi-voice playback (`just_audio`), sound bank JSON persistence
+- **Product**: 4×4 pad grid (landscape-locked), mic record + live waveform meter, Rust WAV normalize/save, multi-voice playback (`just_audio`), sound bank JSON persistence, Android WAV share export
+- **UX shipped (2026-06-09–10)**: immersive UI, landscape-only, two-pane layout, inspector (rename/waveform/volume/loop), haptics, keep-awake, panic stop, pad colors, onboarding, re-normalize, clear-pad confirm
+- **Roadmap**: [`DOCS/feature.md`](./feature.md) — audit log + phased checklist
 - **Rust API**: `audio_processor`, `file_io`, `bank_manager`, `audio_types` (`rust/src/api/`)
 - **Flutter UI**: `lib/screens/`, `lib/widgets/`, `lib/models/app_state.dart`, dark `AppTheme`
 - **Static analysis**: `flutter analyze lib` — no issues (2026-06-08)
@@ -29,6 +31,7 @@ Cross-platform Flutter + Rust app — **SoundPax** (16-pad Android/tablet soundb
 - [README](../README.md)
 - [TEMPLATE](../TEMPLATE.md) — spawn new apps from this boilerplate
 - [SCRATCHPAD](./SCRATCHPAD.md)
+- [FEATURE ROADMAP](./feature.md)
 - [SBOM](./SBOM.md)
 - Rust API: `rust/src/api/` (`audio_processor`, `file_io`, `bank_manager`)
 - Flutter entry: `lib/main.dart` → `PadScreen`

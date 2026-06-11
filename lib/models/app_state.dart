@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'dart:io';
 
 import 'package:soundpax/models/pad_state.dart';
@@ -32,7 +34,29 @@ class AppState extends ChangeNotifier {
   String? tempRecordPath;
   int recordDurationSeconds = 0;
   Timer? _recordTimer;
+  StreamSubscription<Amplitude>? _amplitudeSub;
+  /// Live mic levels during capture (0.0–1.0), newest at end.
+  List<double> recordLevelHistory = [];
+  /// RMS waveform of last take, for preview UI.
+  List<double>? previewWaveform;
   int? activeRecordingTargetPad; // The pad index we are recording for, if any
+  int? selectedPadIndex;
+  bool showOnboarding = false;
+  bool keepScreenOn = false;
+
+  static const int _maxRecordLevelPoints = 96;
+
+  /// Inspector color presets (session UI; not persisted in bank JSON yet).
+  static const List<Color> padColorPresets = [
+    Color(0xFF00E5FF),
+    Color(0xFFB388FF),
+    Color(0xFFFF6B9D),
+    Color(0xFF00E676),
+    Color(0xFFFFB74D),
+    Color(0xFF1A2830),
+    Color(0xFF28251C),
+    Color(0xFF1C1C28),
+  ];
 
   // Playback engine - pool of players for 16 pads
   final List<AudioPlayer?> _players = List.filled(16, null);
@@ -75,22 +99,49 @@ class AppState extends ChangeNotifier {
       await loadBank(savedBanks.first.path);
     }
 
+    await _loadOnboardingFlag();
+
     _initialized = true;
     notifyListeners();
   }
 
-  void _createFallbackBank() {
-    final defaultColors = [
-      const Color(0xFF1C1C28),
-      const Color(0xFF231C28),
-      const Color(0xFF1C2825),
-      const Color(0xFF28251C),
+  Future<void> _loadOnboardingFlag() async {
+    final flag = File('${_appDocDir.path}/onboarding_done.flag');
+    showOnboarding = !await flag.exists();
+  }
+
+  Future<void> dismissOnboarding() async {
+    await File('${_appDocDir.path}/onboarding_done.flag').writeAsString('1');
+    showOnboarding = false;
+    notifyListeners();
+  }
+
+  Future<void> toggleKeepScreenOn() async {
+    keepScreenOn = !keepScreenOn;
+    if (keepScreenOn) {
+      await WakelockPlus.enable();
+    } else {
+      await WakelockPlus.disable();
+    }
+    notifyListeners();
+  }
+
+  static Color defaultPadColor(int index) {
+    const defaultColors = [
+      Color(0xFF1C1C28),
+      Color(0xFF231C28),
+      Color(0xFF1C2825),
+      Color(0xFF28251C),
     ];
+    return defaultColors[index % defaultColors.length];
+  }
+
+  void _createFallbackBank() {
     final pads = List<PadState>.generate(16, (i) {
       return PadState(
         index: i,
         label: 'Pad ${i + 1}',
-        padColor: defaultColors[i % defaultColors.length],
+        padColor: defaultPadColor(i),
       );
     });
     currentBank = BankState(name: 'Default Bank', path: '', pads: pads);
@@ -172,7 +223,22 @@ class AppState extends ChangeNotifier {
 
   // --- Playback Pad Actions ---
 
+  void selectPad(int index) {
+    selectedPadIndex = index;
+    notifyListeners();
+  }
+
+  void renamePad(int index, String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    currentBank.pads[index].label = trimmed;
+    saveCurrentBank();
+    notifyListeners();
+  }
+
   Future<void> triggerPad(int index) async {
+    selectPad(index);
+    HapticFeedback.lightImpact();
     final pad = currentBank.pads[index];
     if (pad.soundPath == null) {
       // Trigger recording for this pad
@@ -181,6 +247,7 @@ class AppState extends ChangeNotifier {
     }
 
     try {
+      HapticFeedback.mediumImpact();
       // Toggle play state visually
       pad.isPlaying = true;
       notifyListeners();
@@ -230,6 +297,48 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Double-tap Stop: kill all pads, preview, and in-progress recording UI.
+  Future<void> panicStop() async {
+    await stopAll();
+    await stopPreview();
+    if (activeRecordingTargetPad != null) {
+      await discardRecording();
+      closeRecordingPanel();
+    }
+    HapticFeedback.heavyImpact();
+    notifyListeners();
+  }
+
+  void updatePadColor(int index, Color color) {
+    currentBank.pads[index].padColor = color;
+    notifyListeners();
+  }
+
+  Future<String?> renormalizePad(int index) async {
+    final pad = currentBank.pads[index];
+    final path = pad.soundPath;
+    if (path == null) return 'Pad has no sound';
+
+    try {
+      final wavData = rust_file.loadWav(path: path);
+      final normalized = rust_processor.normalizeSamples(
+        samples: wavData.samples.map((s) => s.toDouble()).toList(),
+      );
+      rust_file.saveWav(
+        path: path,
+        samples: normalized.map((s) => s.toDouble()).toList(),
+        sampleRate: wavData.sampleRate,
+        channels: wavData.channels,
+      );
+      await _players[index]?.setFilePath(path);
+      notifyListeners();
+      return null;
+    } catch (e) {
+      debugPrint('Renormalize failed for pad $index: $e');
+      return 'Normalize failed: $e';
+    }
+  }
+
   void updatePadVolume(int index, double vol) {
     currentBank.pads[index].volume = vol;
     _players[index]?.setVolume(vol);
@@ -244,13 +353,17 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void clearPad(int index) {
-    currentBank.pads[index].soundPath = null;
-    currentBank.pads[index].label = 'Pad ${index + 1}';
-    currentBank.pads[index].padColor = const Color(0xFF1E1E1E);
-    _players[index]?.stop();
-    saveCurrentBank();
+  Future<void> clearPad(int index) async {
+    final pad = currentBank.pads[index];
+    pad.soundPath = null;
+    pad.label = 'Pad ${index + 1}';
+    pad.padColor = defaultPadColor(index);
+    pad.isPlaying = false;
+    pad.loopEnabled = false;
+    selectedPadIndex = index;
+    await _players[index]?.stop();
     notifyListeners();
+    await saveCurrentBank();
   }
 
   /// Share a single pad's WAV via the system share sheet.
@@ -285,21 +398,75 @@ class AppState extends ChangeNotifier {
 
   void startRecordingPanel({int? targetPadIndex}) {
     activeRecordingTargetPad = targetPadIndex;
+    if (targetPadIndex != null) {
+      selectedPadIndex = targetPadIndex;
+    }
     recordStatus = RecordStatus.idle;
     recordDurationSeconds = 0;
+    _clearRecordingVisuals();
     notifyListeners();
   }
 
   void closeRecordingPanel() {
     activeRecordingTargetPad = null;
     recordStatus = RecordStatus.idle;
+    _clearRecordingVisuals();
     notifyListeners();
+  }
+
+  void _clearRecordingVisuals() {
+    recordLevelHistory = [];
+    previewWaveform = null;
+    _amplitudeSub?.cancel();
+    _amplitudeSub = null;
+  }
+
+  double _dbToLevel(double db) {
+    // dBFS: silence ~-60, loud ~0
+    return ((db.clamp(-60.0, 0.0) + 60.0) / 60.0).clamp(0.0, 1.0);
+  }
+
+  void _startAmplitudeMonitor() {
+    _amplitudeSub?.cancel();
+    recordLevelHistory = [];
+    _amplitudeSub = _recorder
+        .onAmplitudeChanged(const Duration(milliseconds: 50))
+        .listen((amp) {
+      final level = _dbToLevel(amp.current);
+      recordLevelHistory = [
+        ...recordLevelHistory,
+        level,
+      ];
+      if (recordLevelHistory.length > _maxRecordLevelPoints) {
+        recordLevelHistory = recordLevelHistory.sublist(
+          recordLevelHistory.length - _maxRecordLevelPoints,
+        );
+      }
+      notifyListeners();
+    });
+  }
+
+  Future<void> _loadPreviewWaveform() async {
+    if (tempRecordPath == null) return;
+    try {
+      final wavData = rust_file.loadWav(path: tempRecordPath!);
+      final waveform = rust_processor.getWaveformData(
+        samples: wavData.samples.map((s) => s.toDouble()).toList(),
+        numPoints: _maxRecordLevelPoints,
+      );
+      previewWaveform = waveform.toList();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Failed to load preview waveform: $e');
+    }
   }
 
   Future<void> startRecording() async {
     if (await _recorder.hasPermission()) {
       recordStatus = RecordStatus.recording;
       recordDurationSeconds = 0;
+      previewWaveform = null;
+      recordLevelHistory = [];
       tempRecordPath = '${_soundsDir.path}/temp_record.wav';
 
       // Start recording WAV format
@@ -307,6 +474,8 @@ class AppState extends ChangeNotifier {
         const RecordConfig(encoder: AudioEncoder.wav, sampleRate: 44100, numChannels: 1),
         path: tempRecordPath!,
       );
+
+      _startAmplitudeMonitor();
 
       _recordTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         recordDurationSeconds++;
@@ -319,9 +488,12 @@ class AppState extends ChangeNotifier {
 
   Future<void> stopRecording() async {
     _recordTimer?.cancel();
+    _amplitudeSub?.cancel();
+    _amplitudeSub = null;
     await _recorder.stop();
     recordStatus = RecordStatus.preview;
     notifyListeners();
+    await _loadPreviewWaveform();
   }
 
   Future<void> playPreview() async {
@@ -344,6 +516,7 @@ class AppState extends ChangeNotifier {
       }
     }
     recordStatus = RecordStatus.idle;
+    _clearRecordingVisuals();
     notifyListeners();
   }
 
@@ -405,6 +578,10 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _recordTimer?.cancel();
+    _amplitudeSub?.cancel();
+    if (keepScreenOn) {
+      WakelockPlus.disable();
+    }
     _recorder.dispose();
     _previewPlayer?.dispose();
     for (var p in _players) {

@@ -2,6 +2,61 @@
 
 # SCRATCHPAD
 
+## Updated 2026-06-10 — Six quick UX features
+
+1. **Haptics** — light/medium impact on pad tap/play
+2. **Keep awake** — `wakelock_plus` toggle in transport bar
+3. **Panic stop** — double-tap Stop kills pads + preview + record panel
+4. **Pad color picker** — 8 swatches in inspector
+5. **Onboarding** — 3-step overlay, skip, persisted flag file
+6. **Re-normalize** — inspector button runs Rust `normalizeSamples` on existing WAV
+
+## Updated 2026-06-09 — Clear pad fix
+
+- **Root cause**: confirm dialog used bottom-sheet `context` after `Navigator.pop` → unmounted, `clearPad` never ran
+- **pad_grid** — dialog/snackbar use parent `context`; `ValueKey` on pads forces rebuild on clear
+- **clearPad** — resets `isPlaying`, `loopEnabled`, default color; keeps selection; `notifyListeners` before async save
+
+## Updated 2026-06-09 — Two-pane tablet layout + inspector
+
+- **pad_screen** — full-width `Row`: grid (flex 5) + inspector (flex 3); removed 720px cap + bottom hint overlay
+- **pad_inspector** — selected pad: rename, Rust waveform, volume, loop, play/stop/share
+- **app_state** — `selectedPadIndex`, `selectPad`, `renamePad`
+- **waveform_display** — shared static waveform widget (record preview + inspector)
+
+## Updated 2026-06-09 — Feature audit + clear-pad confirm
+
+- **feature.md audit** — checked off immersive UI, clear-pad confirm, pad/bank share; annotated partials (record waveform, volume slider, normalize)
+- **pad_grid** — `AlertDialog` before `clearPad` (matches bank delete pattern)
+- **Next mainstream pick**: rename sample from pad menu (Phase 2 🟢)
+
+## Updated 2026-06-09 — Live recording waveform UI
+
+- **app_state** — `onAmplitudeChanged` (50ms) → rolling `recordLevelHistory`; preview loads Rust `getWaveformData` after stop
+- **record_panel** — real mic graph (bars + line, scrolls right); static cyan waveform on preview
+
+## Updated 2026-06-09 — Landscape lock + immersive UI
+
+- **main.dart** — `landscapeLeft`/`landscapeRight` only; `SystemUiMode.immersiveSticky` for max pad area
+- **AndroidManifest** — `android:screenOrientation="sensorLandscape"` on MainActivity
+- **iOS Info.plist** — landscape-only orientations (phone + iPad)
+- **pad_screen** — dropped portrait branch; always overlay hint layout (landscape-only app)
+
+## Updated 2026-06-09 — Feature roadmap doc
+
+- **New**: `DOCS/feature.md` — phased checklist (P2 editing → P9 power features + infra track); OTG/MIDI = differentiator
+
+## Updated 2026-06-09 — Landscape pad grid clip fix
+
+- **pad_screen** — landscape uses full-height `Stack` (hint bar overlays bottom, no longer steals grid height); tighter 8px padding
+- **pad_grid** — `FittedBox` safety scale + `floorToDouble()` cell sizing so 4×4 grid always fits after rotation
+
+## Updated 2026-06-09 — Pad icon overrun + playing animation
+
+- **pad_grid** — cell size now uses `min(width, height)` so record panel open no longer squishes/overruns pad icons
+- **pad_widget** — removed `Transform.scale` bleed; playing state shows in-pad animated waveform (matches `SoundPax-ui.svg` mockup)
+- **transport_bar** — compact mode on narrow widths (icon-only buttons, ellipsized bank name)
+
 ## Updated 2026-06-09 — Native Android share bridge
 
 - **Removed `share_plus`** — both 10.1.4 and 13.1.0 failed Android Kotlin compile with unresolved same-package share classes under Flutter 3.44 / AGP 9.

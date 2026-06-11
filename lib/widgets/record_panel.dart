@@ -1,9 +1,10 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:soundpax/models/app_state.dart';
 import 'package:soundpax/theme/app_theme.dart';
+import 'package:soundpax/widgets/waveform_display.dart';
+
+const _waveformSlotCount = 96;
 
 class RecordPanel extends StatefulWidget {
   const RecordPanel({super.key});
@@ -12,24 +13,12 @@ class RecordPanel extends StatefulWidget {
   State<RecordPanel> createState() => _RecordPanelState();
 }
 
-class _RecordPanelState extends State<RecordPanel>
-    with SingleTickerProviderStateMixin {
+class _RecordPanelState extends State<RecordPanel> {
   final _nameController = TextEditingController(text: 'Sample');
-  late AnimationController _meterController;
-
-  @override
-  void initState() {
-    super.initState();
-    _meterController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    )..repeat(reverse: true);
-  }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _meterController.dispose();
     super.dispose();
   }
 
@@ -77,22 +66,33 @@ class _RecordPanelState extends State<RecordPanel>
               ),
               const SizedBox(height: 8),
               if (isRecording)
-                AnimatedBuilder(
-                  animation: _meterController,
-                  builder: (context, _) {
-                    return _WaveformMeter(t: _meterController.value);
-                  },
+                _WaveformGraph(
+                  samples: appState.recordLevelHistory,
+                  live: true,
+                  accent: AppTheme.alertRed,
+                  label: 'Listening…',
+                )
+              else if (isPreview && appState.previewWaveform != null)
+                StaticWaveformDisplay(
+                  samples: appState.previewWaveform!,
+                  label: 'Recorded waveform',
+                  height: 72,
                 )
               else
                 Container(
-                  height: 48,
+                  height: 72,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: AppTheme.surfaceElevated,
                     borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: AppTheme.surfaceBright.withValues(alpha: 0.4),
+                    ),
                   ),
                   child: Text(
-                    isPreview ? 'Preview your take' : 'Tap record to capture',
+                    isPreview
+                        ? 'Loading waveform…'
+                        : 'Tap record to capture',
                     style: const TextStyle(color: AppTheme.textMuted),
                   ),
                 ),
@@ -188,6 +188,155 @@ class _RecordPanelState extends State<RecordPanel>
   }
 }
 
+class _WaveformGraph extends StatelessWidget {
+  final List<double> samples;
+  final bool live;
+  final Color accent;
+  final String label;
+
+  const _WaveformGraph({
+    required this.samples,
+    required this.live,
+    required this.accent,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            if (live)
+              Container(
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.only(right: 6),
+                decoration: const BoxDecoration(
+                  color: AppTheme.alertRed,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: live ? AppTheme.alertRed : AppTheme.textMuted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Container(
+          height: 72,
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceElevated,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: live
+                  ? AppTheme.alertRed.withValues(alpha: 0.35)
+                  : AppTheme.primaryCyan.withValues(alpha: 0.35),
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          child: CustomPaint(
+            painter: _WaveformPainter(
+              samples: samples,
+              accent: accent,
+              live: live,
+            ),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _WaveformPainter extends CustomPainter {
+  final List<double> samples;
+  final Color accent;
+  final bool live;
+
+  _WaveformPainter({
+    required this.samples,
+    required this.accent,
+    required this.live,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final midY = size.height / 2;
+    final gridPaint = Paint()
+      ..color = AppTheme.surfaceBright.withValues(alpha: 0.35)
+      ..strokeWidth = 1;
+
+    canvas.drawLine(Offset(0, midY), Offset(size.width, midY), gridPaint);
+
+    if (samples.isEmpty) return;
+
+    final count = samples.length;
+    final slotWidth = size.width / (live ? _waveformSlotCount : count);
+
+    for (var i = 0; i < count; i++) {
+      final level = samples[i].clamp(0.0, 1.0);
+      final barHeight = level * (size.height * 0.9);
+      final x = live
+          ? size.width - (count - i) * slotWidth + slotWidth / 2
+          : i * slotWidth + slotWidth / 2;
+
+      if (x < 0 || x > size.width) continue;
+
+      final barPaint = Paint()
+        ..color = accent.withValues(alpha: 0.35 + level * 0.65)
+        ..strokeWidth = (slotWidth * 0.55).clamp(2.0, 6.0)
+        ..strokeCap = StrokeCap.round;
+
+      canvas.drawLine(
+        Offset(x, midY - barHeight / 2),
+        Offset(x, midY + barHeight / 2),
+        barPaint,
+      );
+    }
+
+    if (live && count > 1) {
+      final path = Path();
+      final startIndex =
+          count > _waveformSlotCount ? count - _waveformSlotCount : 0;
+
+      for (var i = startIndex; i < count; i++) {
+        final level = samples[i].clamp(0.0, 1.0);
+        final x = size.width - (count - i) * slotWidth + slotWidth / 2;
+        final y = midY - level * (size.height * 0.35);
+
+        if (i == startIndex) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+
+      final linePaint = Paint()
+        ..color = accent.withValues(alpha: 0.5)
+        ..strokeWidth = 1.5
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+
+      canvas.drawPath(path, linePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _WaveformPainter oldDelegate) {
+    return oldDelegate.samples != samples ||
+        oldDelegate.accent != accent ||
+        oldDelegate.live != live;
+  }
+}
+
 class _ActionButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -218,41 +367,6 @@ class _ActionButton extends StatelessWidget {
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(fontSize: 12)),
       ],
-    );
-  }
-}
-
-class _WaveformMeter extends StatelessWidget {
-  final double t;
-
-  const _WaveformMeter({required this.t});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 48,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: List.generate(24, (i) {
-          final phase = sin((i * 0.55) + (t * pi * 2));
-          final height = 8.0 + ((phase + 1) / 2) * 36;
-          return Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 1.5),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 100),
-                height: height,
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryCyan.withValues(
-                    alpha: 0.4 + (height / 48) * 0.6,
-                  ),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-          );
-        }),
-      ),
     );
   }
 }

@@ -23,6 +23,7 @@ Software bill of materials for SoundPax. Locked versions from `pubspec.lock` / `
 | record | ^7.0.0 | 7.0.0 | 7.0.0 | Mic capture (WAV) | current |
 | just_audio | ^0.10.5 | 0.10.5 | 0.10.5 | 16-pad playback pool | current |
 | provider | ^6.1.5 | 6.1.5+1 | 6.1.5+1 | AppState / ChangeNotifier | current |
+| wakelock_plus | ^1.6.1 | 1.6.1 | 1.6.1 | Keep screen on during sessions | current |
 | cupertino_icons | ^1.0.9 | 1.0.9 | 1.0.9 | Icons | current |
 
 ## Dart / Flutter — dev
